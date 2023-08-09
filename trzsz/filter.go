@@ -81,6 +81,8 @@ type TrzszFilter struct {
 // └────────┘   ClientOut  └─────────────┘   ServerOut  └────────┘
 //
 // Specify the columns of the terminal in options.TerminalColumns.
+
+// 创建一个新的 trzszfilter
 func NewTrzszFilter(clientIn io.Reader, clientOut io.WriteCloser,
 	serverIn io.WriteCloser, serverOut io.Reader, options TrzszOptions) *TrzszFilter {
 	filter := &TrzszFilter{
@@ -390,11 +392,12 @@ func (filter *TrzszFilter) uploadDragFiles() {
 }
 
 func (filter *TrzszFilter) transformPromptInput(promptPipe *io.PipeWriter, buf []byte) {
-	const keyPrev = '\x10'
-	const keyNext = '\x0E'
+	const keyPrev = '\x10' // ctrl + p 上一条命令
+	const keyNext = '\x0E' // ctrl + n 下一条命令
 	n := len(buf)
 	for i := 0; i < n; i++ {
 		c := buf[i]
+		// esc 转义序列 \x1b[后面接转义序列
 		if c == '\x1b' && n-i > 2 && buf[i+1] == '[' {
 			switch buf[i+2] {
 			case '\x42': // ↓ to Next
@@ -424,11 +427,15 @@ func (filter *TrzszFilter) transformPromptInput(promptPipe *io.PipeWriter, buf [
 	}
 }
 
+// 确认停止传输
 func (filter *TrzszFilter) confirmStopTransfer(transfer *trzszTransfer) {
-	pipeIn, pipeOut := io.Pipe()
+	pipeIn, pipeOut := io.Pipe() // 创建一个没有缓冲的管道
+	// cas 如果 *this == nil, *this = pipeout, return true
+	// 如果 *this != nil, old(nil) = *this, return false
 	if !filter.promptPipe.CompareAndSwap(nil, pipeOut) {
 		pipeIn.Close()
 		pipeOut.Close()
+		// promptPipe != nil 时返回
 		return
 	}
 
@@ -482,7 +489,7 @@ func (filter *TrzszFilter) sendInput(buf []byte) {
 		filter.logger.writeTraceLog(buf, "stdin")
 	}
 	if promptPipe := filter.promptPipe.Load(); promptPipe != nil {
-		filter.transformPromptInput(promptPipe, buf)
+		filter.transformPromptInput(promptPipe, buf) // 通过管道发送快速输入 比如(↑, ↓)
 		return
 	}
 	if transfer := filter.transfer.Load(); transfer != nil {
@@ -507,12 +514,13 @@ func (filter *TrzszFilter) sendInput(buf []byte) {
 	_ = writeAll(filter.serverIn, buf)
 }
 
+// 包装输入, 把标准输入发送到 serverIn
 func (filter *TrzszFilter) wrapInput() {
 	buffer := make([]byte, 32*1024)
 	for {
-		n, err := filter.clientIn.Read(buffer)
+		n, err := filter.clientIn.Read(buffer) // 从输入读取命令
 		if n > 0 {
-			filter.sendInput(buffer[0:n])
+			filter.sendInput(buffer[0:n]) // 发送到 serverIn
 		}
 		if err == io.EOF {
 			if isRunningOnWindows() {

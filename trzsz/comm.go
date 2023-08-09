@@ -113,8 +113,10 @@ type baseArgs struct {
 	Compress  compressType `arg:"-c" placeholder:"yes/no/auto" default:"auto" help:"compress type (default: auto)"`
 }
 
+// 正则表达式:小写模式, 从头部匹配 多个数字, 从尾部匹配0或1个单位
 var sizeRegexp = regexp.MustCompile(`(?i)^(\d+)(b|k|m|g|kb|mb|gb)?$`)
 
+// 从 text 解析 buffsize
 func (b *bufferSize) UnmarshalText(buf []byte) error {
 	str := string(buf)
 	match := sizeRegexp.FindStringSubmatch(str)
@@ -149,6 +151,7 @@ func (b *bufferSize) UnmarshalText(buf []byte) error {
 	return nil
 }
 
+// 从 text 解析 压缩类型
 func (c *compressType) UnmarshalText(buf []byte) error {
 	str := strings.ToLower(strings.TrimSpace(string(buf)))
 	switch str {
@@ -166,6 +169,7 @@ func (c *compressType) UnmarshalText(buf []byte) error {
 	}
 }
 
+// 从 json 解析压缩类型
 func (c *compressType) UnmarshalJSON(data []byte) error {
 	var compress int
 	if err := json.Unmarshal(data, &compress); err != nil {
@@ -175,30 +179,33 @@ func (c *compressType) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+// 压缩并加密字节序列
 func encodeBytes(buf []byte) string {
 	b := bytes.NewBuffer(make([]byte, 0, len(buf)+0x10))
-	z := zlib.NewWriter(b)
-	_ = writeAll(z, []byte(buf))
+	z := zlib.NewWriter(b)       // 利用 b 为底层创建压缩对象 z
+	_ = writeAll(z, []byte(buf)) // 把 buff 压缩并写到 z 对象的 b 中
 	z.Close()
-	return base64.StdEncoding.EncodeToString(b.Bytes())
+	return base64.StdEncoding.EncodeToString(b.Bytes()) // 加密编码
 }
 
+// 压缩并加密字符串
 func encodeString(str string) string {
 	return encodeBytes([]byte(str))
 }
 
+// 解压并解密字符串
 func decodeString(str string) ([]byte, error) {
-	b, err := base64.StdEncoding.DecodeString(str)
+	b, err := base64.StdEncoding.DecodeString(str) // 先解编码
 	if err != nil {
 		return nil, err
 	}
-	z, err := zlib.NewReader(bytes.NewReader(b))
+	z, err := zlib.NewReader(bytes.NewReader(b)) // 读取的时候解压
 	if err != nil {
 		return nil, err
 	}
 	defer z.Close()
 	buf := bytes.NewBuffer(make([]byte, 0, len(b)<<2))
-	if _, err := io.Copy(buf, z); err != nil {
+	if _, err := io.Copy(buf, z); err != nil { // copy 到 buf 中
 		return nil, err
 	}
 	return buf.Bytes(), nil
@@ -216,6 +223,7 @@ var (
 	errReceiveDataTimeout = simpleTrzszError("Receive data timeout")
 )
 
+// 创建一个 trzszError 类型
 func newTrzszError(message string, errType string, trace bool) *trzszError {
 	if errType == "fail" || errType == "FAIL" || errType == "EXIT" {
 		msg, err := decodeString(message)
@@ -229,11 +237,12 @@ func newTrzszError(message string, errType string, trace bool) *trzszError {
 	}
 	err := &trzszError{message, errType, trace}
 	if err.isTraceBack() {
-		err.message = fmt.Sprintf("%s\n%s", err.message, string(debug.Stack()))
+		err.message = fmt.Sprintf("%s\n%s", err.message, string(debug.Stack())) // 是否要跟踪错误
 	}
 	return err
 }
 
+// 创建一个简单 trzszError 类型, 不跟踪错误
 func simpleTrzszError(format string, a ...any) *trzszError {
 	return newTrzszError(fmt.Sprintf(format, a...), "", false)
 }
@@ -243,6 +252,7 @@ func (e *trzszError) Error() string {
 }
 
 func (e *trzszError) isTraceBack() bool {
+	// fail 或 exit 不跟踪错误
 	if e.errType == "fail" || e.errType == "EXIT" {
 		return false
 	}
@@ -264,6 +274,7 @@ func (e *trzszError) isStopAndDelete() bool {
 	return e.message == errStoppedAndDeleted.message
 }
 
+// 检查文件路径是否可写
 func checkPathWritable(path string) error {
 	info, err := os.Stat(path)
 	if os.IsNotExist(err) {
@@ -280,10 +291,11 @@ func checkPathWritable(path string) error {
 	return nil
 }
 
+// json:"-" 表示json不解析该字段
 type sourceFile struct {
 	PathID   int           `json:"path_id"`
 	AbsPath  string        `json:"-"`
-	RelPath  []string      `json:"path_name"`
+	RelPath  []string      `json:"path_name"` // 目录下的所有文件和子目录的相对路径(一个相对路径可以Join成一个绝对路径)
 	IsDir    bool          `json:"is_dir"`
 	Archive  bool          `json:"archive"`
 	Size     int64         `json:"size"`
@@ -298,6 +310,7 @@ func (f *sourceFile) getFileName() string {
 	return f.RelPath[len(f.RelPath)-1]
 }
 
+// 从 sourceFile 解析成 json
 func (f *sourceFile) marshalSourceFile() (string, error) {
 	f.Archive = len(f.SubFiles) > 0
 	jstr, err := json.Marshal(f)
@@ -307,6 +320,7 @@ func (f *sourceFile) marshalSourceFile() (string, error) {
 	return string(jstr), nil
 }
 
+// 从 json 解析成 sourceFile
 func unmarshalSourceFile(source string) (*sourceFile, error) {
 	var file sourceFile
 	if err := json.Unmarshal([]byte(source), &file); err != nil {
@@ -323,6 +337,7 @@ type targetFile struct {
 	Size int64  `json:"size"`
 }
 
+// 从 targetFile 解析成 json
 func (f *targetFile) marshalTargetFile() (string, error) {
 	jstr, err := json.Marshal(f)
 	if err != nil {
@@ -331,6 +346,7 @@ func (f *targetFile) marshalTargetFile() (string, error) {
 	return string(jstr), nil
 }
 
+// 从 json 解析成 targetFile
 func unmarshalTargetFile(target string) (*targetFile, error) {
 	var file targetFile
 	if err := json.Unmarshal([]byte(target), &file); err != nil {
@@ -342,18 +358,22 @@ func unmarshalTargetFile(target string) (*targetFile, error) {
 	return &file, nil
 }
 
+// 检查路径下的所有文件是否可读
 func checkPathReadable(pathID int, path string, info os.FileInfo, list *[]*sourceFile,
 	relPath []string, visitedDir map[string]bool) error {
 	if !info.IsDir() {
+		// 如果不是目录(说明是 文件)
 		if !info.Mode().IsRegular() {
 			return simpleTrzszError("Not a regular file: %s", path)
 		}
 		if syscallAccessRok(path) != nil {
 			return simpleTrzszError("No permission to read: %s", path)
 		}
-		*list = append(*list, &sourceFile{PathID: pathID, AbsPath: path, RelPath: relPath, Size: info.Size()})
+		*list = append(*list, &sourceFile{PathID: pathID, AbsPath: path, RelPath: relPath, Size: info.Size()}) // 添加到 list 中
 		return nil
 	}
+	// 如果是目录
+	// 解析符号链接的实际路径
 	realPath, err := filepath.EvalSymlinks(path)
 	if err != nil {
 		return err
@@ -367,19 +387,22 @@ func checkPathReadable(pathID int, path string, info os.FileInfo, list *[]*sourc
 	if err != nil {
 		return simpleTrzszError("Open [%s] error: %v", path, err)
 	}
-	files, err := fileObj.Readdir(-1)
+	files, err := fileObj.Readdir(-1) // 读取目录下的所有文件和子目录返回 []fs.FileInfo
 	if err != nil {
 		return simpleTrzszError("Readdir [%s] error: %v", path, err)
 	}
 	for _, file := range files {
+		// 将任意数量的指定路径元素连接到单个路径中，并在必要时添加分隔符。此函数对结果调用Clean，所有空字符串都将被忽略。
+		// 即 path/file.Name() 拼接
 		p := filepath.Join(path, file.Name())
 		info, err := os.Stat(p)
 		if err != nil {
 			return simpleTrzszError("Stat [%s] error: %v", p, err)
 		}
-		r := make([]string, len(relPath))
+		r := make([]string, len(relPath)) // 多复制一份相对路径 slice
 		copy(r, relPath)
 		r = append(r, file.Name())
+		// 递归检查是否可读, 直到该文件路径是一个文件
 		if err := checkPathReadable(pathID, p, info, list, r, visitedDir); err != nil {
 			return err
 		}
@@ -387,10 +410,11 @@ func checkPathReadable(pathID int, path string, info os.FileInfo, list *[]*sourc
 	return nil
 }
 
+// 检查 一组 paths 是否可读
 func checkPathsReadable(paths []string, directory bool) ([]*sourceFile, error) {
 	var list []*sourceFile
 	for i, p := range paths {
-		path, err := filepath.Abs(p)
+		path, err := filepath.Abs(p) // 返回绝对路径, 如果本身不是绝对路径以当前路径拼接
 		if err != nil {
 			return nil, err
 		}
@@ -411,6 +435,7 @@ func checkPathsReadable(paths []string, directory bool) ([]*sourceFile, error) {
 	return list, nil
 }
 
+// 检查是否有重复的绝对路径名字
 func checkDuplicateNames(sourceFiles []*sourceFile) error {
 	m := make(map[string]bool)
 	for _, srcFile := range sourceFiles {
@@ -423,6 +448,7 @@ func checkDuplicateNames(sourceFiles []*sourceFile) error {
 	return nil
 }
 
+// 返回一个新的不存在的名字,新名字是 name.i 的形式
 func getNewName(path, name string) (string, error) {
 	if _, err := os.Stat(filepath.Join(path, name)); os.IsNotExist(err) {
 		return name, nil
@@ -444,21 +470,22 @@ const (
 	tmuxControlMode
 )
 
+// 检查当前的 tmux
 func checkTmux() (tmuxModeType, *os.File, int32, error) {
 	if _, tmux := os.LookupEnv("TMUX"); !tmux {
 		return noTmuxMode, os.Stdout, -1, nil
 	}
-
+	// tmux display-message -p '#{client_tty}':'#{client_control_mode}':'#{pane_width}'
 	cmd := exec.Command("tmux", "display-message", "-p", "#{client_tty}:#{client_control_mode}:#{pane_width}")
 	out, err := cmd.Output()
 	if err != nil {
-		return 0, nil, -1, fmt.Errorf("Get tmux output failed: %v", err)
+		return 0, nil, -1, fmt.Errorf("get tmux output failed: %v", err)
 	}
 
 	output := strings.TrimSpace(string(out))
 	tokens := strings.Split(output, ":")
 	if len(tokens) != 3 {
-		return 0, nil, -1, fmt.Errorf("Unexpect tmux output: %s", output)
+		return 0, nil, -1, fmt.Errorf("unexpect tmux output: %s", output)
 	}
 	tmuxTty, controlMode, paneWidth := tokens[0], tokens[1], tokens[2]
 
@@ -471,13 +498,13 @@ func checkTmux() (tmuxModeType, *os.File, int32, error) {
 
 	tmuxStdout, err := os.OpenFile(tmuxTty, os.O_WRONLY, 0)
 	if err != nil {
-		return 0, nil, -1, fmt.Errorf("Open tmux tty [%s] failed: %v", tmuxTty, err)
+		return 0, nil, -1, fmt.Errorf("open tmux tty [%s] failed: %v", tmuxTty, err)
 	}
 	tmuxPaneWidth := -1
 	if len(paneWidth) > 0 {
 		tmuxPaneWidth, err = strconv.Atoi(paneWidth)
 		if err != nil {
-			return 0, nil, -1, fmt.Errorf("Parse tmux pane width [%s] failed: %v", paneWidth, err)
+			return 0, nil, -1, fmt.Errorf("parse tmux pane width [%s] failed: %v", paneWidth, err)
 		}
 	}
 
@@ -514,6 +541,7 @@ func setTmuxStatusInterval(interval string) {
 	_ = cmd.Run()
 }
 
+// 返回当前终端的 列数
 func getTerminalColumns() int {
 	cmd := exec.Command("stty", "size")
 	cmd.Stdin = os.Stdin
@@ -530,15 +558,16 @@ func getTerminalColumns() int {
 	return cols
 }
 
+// 包装 标准输入和 server 端输入
 func wrapStdinInput(transfer *trzszTransfer) {
-	const bufSize = 32 * 1024
+	const bufSize = 32 * 1024 // 32kb
 	buffer := make([]byte, bufSize)
 	for {
 		n, err := os.Stdin.Read(buffer)
 		if n > 0 {
 			buf := buffer[0:n]
 			transfer.addReceivedData(buf)
-			buffer = make([]byte, bufSize)
+			buffer = make([]byte, bufSize) // 重新置空
 		}
 		if err == io.EOF {
 			transfer.stopTransferringFiles(false)
@@ -546,6 +575,7 @@ func wrapStdinInput(transfer *trzszTransfer) {
 	}
 }
 
+// 监听退出信号
 func handleServerSignal(transfer *trzszTransfer) {
 	sigstop := make(chan os.Signal, 1)
 	signal.Notify(sigstop, os.Interrupt, syscall.SIGTERM)
@@ -555,6 +585,7 @@ func handleServerSignal(transfer *trzszTransfer) {
 	}()
 }
 
+// 是否是 a-z 或 A-Z (VT100 终端命令的终止字符)
 func isVT100End(b byte) bool {
 	if 'a' <= b && b <= 'z' {
 		return true
@@ -565,6 +596,7 @@ func isVT100End(b byte) bool {
 	return false
 }
 
+// 修剪 字符序列(跳过 VT100 命令)
 func trimVT100(buf []byte) []byte {
 	b := new(bytes.Buffer)
 	skipVT100 := false
@@ -573,7 +605,7 @@ func trimVT100(buf []byte) []byte {
 			if isVT100End(c) {
 				skipVT100 = false
 			}
-		} else if c == '\x1b' {
+		} else if c == '\x1b' { // '\x1b' == 27 即 esc
 			skipVT100 = true
 		} else {
 			b.WriteByte(c)
@@ -582,6 +614,7 @@ func trimVT100(buf []byte) []byte {
 	return b.Bytes()
 }
 
+// elem 是否包含 v
 func containsString(elems []string, v string) bool {
 	for _, s := range elems {
 		if v == s {
@@ -591,6 +624,7 @@ func containsString(elems []string, v string) bool {
 	return false
 }
 
+// 把 data 的字节序列写到 dst
 func writeAll(dst io.Writer, data []byte) error {
 	m := 0
 	l := len(data)
@@ -622,6 +656,7 @@ func parseTrzszVersion(ver string) (*trzszVersion, error) {
 	return &version, nil
 }
 
+// 比较版本
 func (v *trzszVersion) compare(ver *trzszVersion) int {
 	for i := 0; i < 3; i++ {
 		if v[i] < ver[i] {
@@ -773,6 +808,8 @@ func newTraceLogger() *traceLogger {
  * │ Linux and macOS    │ echo -e '<ENABLE_TRZSZ_TRACE_LOG\x3E'     │ echo -e '<DISABLE_TRZSZ_TRACE_LOG\x3E'     │
  * └────────────────────┴───────────────────────────────────────────┴────────────────────────────────────────────┘
  */
+
+// 把 buf 编码后写到追踪日志中
 func (logger *traceLogger) writeTraceLog(buf []byte, typ string) []byte {
 	if ch, file := logger.traceLogChan.Load(), logger.traceLogFile.Load(); ch != nil && file != nil {
 		if typ == "svrout" && bytes.Contains(buf, []byte("<DISABLE_TRZSZ_TRACE_LOG>")) {

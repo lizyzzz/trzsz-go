@@ -34,6 +34,7 @@ import (
 	"unicode/utf8"
 )
 
+// 获取 字符展示的长度(ascii 码长度为1, 其他 utf-8 长度为 2)
 func getDisplayLength(str string) int {
 	length := 0
 	for _, r := range []rune(str) { // nolint:all
@@ -46,6 +47,7 @@ func getDisplayLength(str string) int {
 	return length
 }
 
+// 把字符串转换为 rune 序列, 并且在达到最大长度时 用 ... 代替后面的
 func getEllipsisString(str string, max int) (string, int) {
 	var b strings.Builder
 	b.Grow(max)

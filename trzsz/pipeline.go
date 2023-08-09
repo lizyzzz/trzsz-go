@@ -455,7 +455,7 @@ func (t *trzszTransfer) sendCompressFlag(file fileReader) (bool, error) {
 	}
 	compress, err := isCompressionProfitable(file)
 	if err != nil {
-		return false, fmt.Errorf("Compression detect failed: %v", err)
+		return false, fmt.Errorf("compression detect failed: %v", err)
 	}
 	return compress, t.sendLine("COMP", strconv.FormatBool(compress))
 }
