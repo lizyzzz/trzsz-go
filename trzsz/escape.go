@@ -46,13 +46,14 @@ func (s unicode) MarshalJSON() ([]byte, error) {
 		if c < 128 && strconv.IsPrint(c) {
 			b.WriteRune(c)
 		} else {
-			b.WriteString(fmt.Sprintf("\\u%04x", c))
+			b.WriteString(fmt.Sprintf("\\u%04x", c)) // \u 后面接4个16进制数, 表示两个字节的转义
 		}
 	}
 	b.WriteByte('"')
 	return b.Bytes(), nil
 }
 
+// 获取转义字符
 func getEscapeChars(escapeAll bool) [][]unicode {
 	escapeChars := [][]unicode{
 		{"\u00ee", "\u00ee\u00ee"},
@@ -61,7 +62,7 @@ func getEscapeChars(escapeAll bool) [][]unicode {
 	if escapeAll {
 		const chars = unicode("\x02\x10\x1b\x1d\u009d")
 		for i, c := range chars {
-			escapeChars = append(escapeChars, []unicode{unicode(c), "\u00ee" + unicode(byte(i+0x41))})
+			escapeChars = append(escapeChars, []unicode{unicode(c), "\u00ee" + unicode(byte(i+0x41))}) // "i+65" 即 A B C D
 		}
 	}
 	return escapeChars

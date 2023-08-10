@@ -124,6 +124,7 @@ func minInt(a, b int) int {
 	return b
 }
 
+// 创建一个新的 transfer 对象
 func newTransfer(writer io.Writer, stdinState *term.State, flushInTime bool, logger *traceLogger) *trzszTransfer {
 	t := &trzszTransfer{
 		buffer:       newTrzszBuffer(),

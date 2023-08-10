@@ -29,24 +29,27 @@ import (
 	"time"
 )
 
+// 发送缓存类型
 type trzszBuffer struct {
 	bufCh      chan []byte
 	stopCh     chan bool
 	nextBuf    []byte
-	nextIdx    int
+	nextIdx    int // 下一个可读取的下表
 	readBuf    bytes.Buffer
-	timeout    <-chan time.Time
-	newTimeout <-chan time.Time
+	timeout    <-chan time.Time // 上一个超时时间
+	newTimeout <-chan time.Time // 新的超时时间
 }
 
 func newTrzszBuffer() *trzszBuffer {
 	return &trzszBuffer{bufCh: make(chan []byte, 10000), stopCh: make(chan bool, 1)}
 }
 
+// 往 trzszbuffer 发送数据 buf
 func (b *trzszBuffer) addBuffer(buf []byte) {
 	b.bufCh <- buf
 }
 
+// 停止接收数据, 往 stopCh 发送 true
 func (b *trzszBuffer) stopBuffer() {
 	select {
 	case b.stopCh <- true:
@@ -54,6 +57,7 @@ func (b *trzszBuffer) stopBuffer() {
 	}
 }
 
+// 把 bufCh 的 数据清空
 func (b *trzszBuffer) drainBuffer() {
 	for {
 		select {
@@ -64,6 +68,7 @@ func (b *trzszBuffer) drainBuffer() {
 	}
 }
 
+// 从 trzszbuffer 取出数据 (返回 nextBuf 或从 bufCh 读取), 并置空
 func (b *trzszBuffer) popBuffer() []byte {
 	if b.nextBuf != nil && b.nextIdx < len(b.nextBuf) {
 		buf := b.nextBuf[b.nextIdx:]
@@ -81,10 +86,12 @@ func (b *trzszBuffer) popBuffer() []byte {
 	}
 }
 
+// 设置新的 timeout 接收channel
 func (b *trzszBuffer) setNewTimeout(timeout <-chan time.Time) {
 	b.newTimeout = timeout
 }
 
+// 返回 nextBuffer 但不置空
 func (b *trzszBuffer) nextBuffer() ([]byte, error) {
 	if b.nextBuf != nil && b.nextIdx < len(b.nextBuf) {
 		return b.nextBuf[b.nextIdx:], nil
@@ -107,6 +114,7 @@ func (b *trzszBuffer) nextBuffer() ([]byte, error) {
 	}
 }
 
+// 以 \n 为分隔符读取一行
 func (b *trzszBuffer) readLine(mayHasJunk bool, timeout <-chan time.Time) ([]byte, error) {
 	b.readBuf.Reset()
 	b.timeout = timeout
@@ -124,19 +132,20 @@ func (b *trzszBuffer) readLine(mayHasJunk bool, timeout <-chan time.Time) ([]byt
 			b.nextIdx += len(buf)
 		}
 		if bytes.IndexByte(buf, '\x03') >= 0 { // `ctrl + c` to interrupt
-			return nil, simpleTrzszError("Interrupted")
+			return nil, simpleTrzszError("Interrupted") // 存在 ctrl + c
 		}
 		b.readBuf.Write(buf)
 		if newLineIdx >= 0 {
 			if mayHasJunk && b.readBuf.Len() > 0 && b.readBuf.Bytes()[b.readBuf.Len()-1] == '\r' {
-				b.readBuf.Truncate(b.readBuf.Len() - 1)
-				continue
+				b.readBuf.Truncate(b.readBuf.Len() - 1) // 保留前 n - 1 位
+				continue                                // 可以多次写到 readBuf 中
 			}
 			return b.readBuf.Bytes(), nil
 		}
 	}
 }
 
+// 读取固定长度的 字节
 func (b *trzszBuffer) readBinary(size int, timeout <-chan time.Time) ([]byte, error) {
 	b.readBuf.Reset()
 	if b.readBuf.Cap() < size {
@@ -161,6 +170,7 @@ func (b *trzszBuffer) readBinary(size int, timeout <-chan time.Time) ([]byte, er
 	return b.readBuf.Bytes(), nil
 }
 
+// 是否是特定的字符(a-z, A-Z, 0-9, #:+/=)
 func isTrzszLetter(b byte) bool {
 	if 'a' <= b && b <= 'z' {
 		return true
