@@ -187,6 +187,7 @@ func isTrzszLetter(b byte) bool {
 	return false
 }
 
+// 读取窗口中的一行(以 ! 为分割)
 func (b *trzszBuffer) readLineOnWindows(timeout <-chan time.Time) ([]byte, error) {
 	b.readBuf.Reset()
 	b.timeout = timeout
@@ -202,16 +203,17 @@ func (b *trzszBuffer) readLineOnWindows(timeout <-chan time.Time) ([]byte, error
 		if err != nil {
 			return nil, err
 		}
-		newLineIdx := bytes.IndexByte(buf, '!')
+		newLineIdx := bytes.IndexByte(buf, '!') // 以 '!' 分割一行?
 		if newLineIdx >= 0 {
-			b.nextIdx += newLineIdx + 1 // +1 to ignroe the newline
-			if b.nextIdx < len(buf) && buf[b.nextIdx] == '\n' {
+			b.nextIdx += newLineIdx + 1                         // +1 to ignroe the newline
+			if b.nextIdx < len(buf) && buf[b.nextIdx] == '\n' { // 也跳过 \n
 				b.nextIdx++
 			}
 			buf = buf[0:newLineIdx]
 		} else {
 			b.nextIdx += len(buf)
 		}
+		// 检查序列中是否有其他字符
 		for i := 0; i < len(buf); i++ {
 			c := buf[i]
 			if c == '\x03' { // `ctrl + c` to interrupt
@@ -220,22 +222,23 @@ func (b *trzszBuffer) readLineOnWindows(timeout <-chan time.Time) ([]byte, error
 			if c == '\n' {
 				hasNewline = true
 			}
-			if skipVT100 {
+			if skipVT100 { // 转义字符序列的开始
+				// \x1b[H (\x1b[m;nH 表示 光标移到 m行 n列, 默认是 1,1 )
 				if isVT100End(c) {
 					skipVT100 = false
 					// moving the cursor may result in duplicate characters
 					if c == 'H' && lastByte >= '0' && lastByte <= '9' {
-						mayDuplicate = true
+						mayDuplicate = true // 移动光标可能会重复字符
 					}
 				}
 				if lastByte == '[' && c == 'H' {
-					hasCursorHome = true
+					hasCursorHome = true // 有位于 1, 1 的光标
 				}
 				lastByte = c
 			} else if c == '\x1b' {
 				skipVT100 = true
 				lastByte = c
-			} else if isTrzszLetter(c) {
+			} else if isTrzszLetter(c) { // 只保留特定字符
 				if mayDuplicate {
 					mayDuplicate = false
 					// skip the duplicate characters, e.g., the "8" in "8\r\n\x1b[25;119H8".
