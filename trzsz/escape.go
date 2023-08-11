@@ -39,6 +39,7 @@ type escapeArray [][]byte
 
 const escapeLeaderByte = '\xee'
 
+// 解析到 JSON
 func (s unicode) MarshalJSON() ([]byte, error) {
 	b := new(bytes.Buffer)
 	b.WriteByte('"')
@@ -68,6 +69,7 @@ func getEscapeChars(escapeAll bool) [][]unicode {
 	return escapeChars
 }
 
+// 从字符 转义到 codes
 func escapeCharsToCodes(escapeChars []interface{}) ([][]byte, error) {
 	escapeCodes := make([][]byte, len(escapeChars))
 	encoder := charmap.ISO8859_1.NewEncoder()
@@ -122,6 +124,7 @@ func (c *escapeArray) UnmarshalJSON(data []byte) error {
 	return err
 }
 
+// 转义 字节序列
 func escapeData(data []byte, escapeCodes [][]byte) []byte {
 	if len(escapeCodes) == 0 {
 		return data
@@ -150,6 +153,7 @@ func escapeData(data []byte, escapeCodes [][]byte) []byte {
 	return buf[:idx]
 }
 
+// 解析 已转义的序列
 func unescapeData(data []byte, escapeCodes [][]byte, dst []byte) ([]byte, []byte, error) {
 	if len(escapeCodes) == 0 {
 		return data, nil, nil

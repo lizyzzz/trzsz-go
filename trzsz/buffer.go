@@ -136,6 +136,7 @@ func (b *trzszBuffer) readLine(mayHasJunk bool, timeout <-chan time.Time) ([]byt
 		}
 		b.readBuf.Write(buf)
 		if newLineIdx >= 0 {
+			// \r\n 的情况 且 mayHasJunk , 允许多次写入
 			if mayHasJunk && b.readBuf.Len() > 0 && b.readBuf.Bytes()[b.readBuf.Len()-1] == '\r' {
 				b.readBuf.Truncate(b.readBuf.Len() - 1) // 保留前 n - 1 位
 				continue                                // 可以多次写到 readBuf 中
@@ -187,7 +188,7 @@ func isTrzszLetter(b byte) bool {
 	return false
 }
 
-// 读取窗口中的一行(以 ! 为分割)
+// 在 windows 系统中调用; 读取一行(以 ! 为分隔)
 func (b *trzszBuffer) readLineOnWindows(timeout <-chan time.Time) ([]byte, error) {
 	b.readBuf.Reset()
 	b.timeout = timeout

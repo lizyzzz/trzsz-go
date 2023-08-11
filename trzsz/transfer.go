@@ -64,36 +64,36 @@ type transferAction struct {
 
 type transferConfig struct {
 	Quiet           bool         `json:"quiet"`
-	Binary          bool         `json:"binary"`
+	Binary          bool         `json:"binary"` // 是否是发送二进制文件(字节序列)
 	Directory       bool         `json:"directory"`
 	Overwrite       bool         `json:"overwrite"`
 	Timeout         int          `json:"timeout"`
-	Newline         string       `json:"newline"`
+	Newline         string       `json:"newline"` // 新一行的标记
 	Protocol        int          `json:"protocol"`
 	MaxBufSize      int64        `json:"bufsize"`
-	EscapeCodes     escapeArray  `json:"escape_chars"`
+	EscapeCodes     escapeArray  `json:"escape_chars"` // 转义字符数组
 	TmuxPaneColumns int32        `json:"tmux_pane_width"`
-	TmuxOutputJunk  bool         `json:"tmux_output_junk"`
+	TmuxOutputJunk  bool         `json:"tmux_output_junk"` // tmux 是否会输出 \r 字符
 	CompressType    compressType `json:"compress"`
 }
 
 type trzszTransfer struct {
-	buffer           *trzszBuffer
+	buffer           *trzszBuffer // 数据传输的 buffer
 	writer           io.Writer
 	stopped          atomic.Bool
 	stopAndDelete    atomic.Bool
-	pausing          atomic.Bool
-	pauseIdx         atomic.Uint32
-	pauseBeginTime   atomic.Int64
-	resumeBeginTime  atomic.Pointer[time.Time]
-	lastInputTime    atomic.Int64
-	cleanTimeout     time.Duration
+	pausing          atomic.Bool               // 是否正在暂停
+	pauseIdx         atomic.Uint32             // 暂停的次数
+	pauseBeginTime   atomic.Int64              // 暂停的开始时间
+	resumeBeginTime  atomic.Pointer[time.Time] // 恢复传输的时间
+	lastInputTime    atomic.Int64              // 上一次的输入时间
+	cleanTimeout     time.Duration             // 超时时间
 	lastChunkTimeArr [kLastChunkTimeCount]time.Duration
 	lastChunkTimeIdx int
 	stdinState       *term.State
 	fileNameMap      map[int]string
 	windowsProtocol  bool
-	flushInTime      bool
+	flushInTime      bool // 是否及时刷盘
 	bufInitWG        sync.WaitGroup
 	bufInitPhase     atomic.Bool
 	bufferSize       atomic.Int64
@@ -103,6 +103,7 @@ type trzszTransfer struct {
 	createdFiles     []string
 }
 
+// 两个最大的 time.Duration
 func maxDuration(a, b time.Duration) time.Duration {
 	if a > b {
 		return a
@@ -110,6 +111,7 @@ func maxDuration(a, b time.Duration) time.Duration {
 	return b
 }
 
+// 两个最小的 int64
 func minInt64(a, b int64) int64 {
 	if a < b {
 		return a
@@ -117,6 +119,7 @@ func minInt64(a, b int64) int64 {
 	return b
 }
 
+// 两个最小的 int
 func minInt(a, b int) int {
 	if a < b {
 		return a
@@ -145,6 +148,7 @@ func newTransfer(writer io.Writer, stdinState *term.State, flushInTime bool, log
 	return t
 }
 
+// 添加接收到的数据
 func (t *trzszTransfer) addReceivedData(buf []byte) {
 	if !t.stopped.Load() {
 		t.buffer.addBuffer(buf)
@@ -152,6 +156,7 @@ func (t *trzszTransfer) addReceivedData(buf []byte) {
 	t.lastInputTime.Store(time.Now().UnixMilli())
 }
 
+// 停止正在传输的文件
 func (t *trzszTransfer) stopTransferringFiles(stopAndDelete bool) {
 	if t.stopped.Load() {
 		return
@@ -160,6 +165,7 @@ func (t *trzszTransfer) stopTransferringFiles(stopAndDelete bool) {
 	t.stopped.Store(true)
 	t.buffer.stopBuffer()
 
+	// 更新超时时间
 	maxChunkTime := time.Duration(0)
 	for _, chunkTime := range t.lastChunkTimeArr {
 		if chunkTime > maxChunkTime {
@@ -174,6 +180,7 @@ func (t *trzszTransfer) stopTransferringFiles(stopAndDelete bool) {
 	t.cleanTimeout = maxDuration(waitTime, 500*time.Millisecond)
 }
 
+// 暂停正在传输的文件
 func (t *trzszTransfer) pauseTransferringFiles() {
 	t.pausing.Store(true)
 	if t.pauseBeginTime.Load() == 0 {
@@ -182,6 +189,7 @@ func (t *trzszTransfer) pauseTransferringFiles() {
 	}
 }
 
+// 恢复传输文件
 func (t *trzszTransfer) resumeTransferringFiles() {
 	now := timeNowFunc()
 	t.resumeBeginTime.Store(&now)
@@ -190,6 +198,7 @@ func (t *trzszTransfer) resumeTransferringFiles() {
 	t.pausing.Store(false)
 }
 
+// 检查是否已经 stop , yes 则 err != nil, no 则 err == nil
 func (t *trzszTransfer) checkStop() error {
 	if t.stopAndDelete.Load() {
 		return errStoppedAndDeleted
@@ -200,7 +209,9 @@ func (t *trzszTransfer) checkStop() error {
 	return nil
 }
 
+// 设置最后一块的时间
 func (t *trzszTransfer) setLastChunkTime(chunkTime time.Duration) {
+	// 循环存放在 lastChunkTime 中, 并更新 idx
 	t.lastChunkTimeArr[t.lastChunkTimeIdx] = chunkTime
 	t.lastChunkTimeIdx++
 	if t.lastChunkTimeIdx >= kLastChunkTimeCount {
@@ -208,6 +219,7 @@ func (t *trzszTransfer) setLastChunkTime(chunkTime time.Duration) {
 	}
 }
 
+// 清除输入 (并阻塞 指定时间)
 func (t *trzszTransfer) cleanInput(timeoutDuration time.Duration) {
 	t.stopped.Store(true)
 	t.buffer.drainBuffer()
@@ -221,6 +233,7 @@ func (t *trzszTransfer) cleanInput(timeoutDuration time.Duration) {
 	}
 }
 
+// 把 buf 全部写到 writer
 func (t *trzszTransfer) writeAll(buf []byte) error {
 	if t.logger != nil {
 		t.logger.writeTraceLog(buf, "tosvr")
@@ -228,39 +241,43 @@ func (t *trzszTransfer) writeAll(buf []byte) error {
 	return writeAll(t.writer, buf)
 }
 
+// 发送一行数据: 头部是 typ, 中间是 buf, 尾部是换行符 ("#typ:buf\n") 其中 \n 是换行符可以由config指定
 func (t *trzszTransfer) sendLine(typ string, buf string) error {
 	return t.writeAll([]byte(fmt.Sprintf("#%s:%s%s", typ, buf, t.transferConfig.Newline)))
 }
 
+// 清除 tmux 状态行 (保留其他字符串)
 func (t *trzszTransfer) stripTmuxStatusLine(buf []byte) []byte {
 	for {
 		beginIdx := bytes.Index(buf, []byte("\x1bP="))
 		if beginIdx < 0 {
 			return buf
 		}
-		bufIdx := beginIdx + 3
+		bufIdx := beginIdx + 3 // 跳过 \x1bP= [设备控制字符串：代表用户自定义密钥]
 		midIdx := bytes.Index(buf[bufIdx:], []byte("\x1bP="))
 		if midIdx < 0 {
 			return buf[:beginIdx]
 		}
 		bufIdx += midIdx + 3
-		endIdx := bytes.Index(buf[bufIdx:], []byte("\x1b\\"))
+		endIdx := bytes.Index(buf[bufIdx:], []byte("\x1b\\")) // 'ESC \' 终止其他控件（包括APC，DCS，OSC，PM和SOS）中的字符串
 		if endIdx < 0 {
 			return buf[:beginIdx]
 		}
 		bufIdx += endIdx + 2
 		b := bytes.NewBuffer(make([]byte, 0, len(buf)-(bufIdx-beginIdx)))
 		b.Write(buf[:beginIdx])
-		b.Write(buf[bufIdx:])
+		b.Write(buf[bufIdx:]) // 相当于 去掉了 [beginIdx, bufIdx) 的内容
 		buf = b.Bytes()
 	}
 }
 
+// 接收期望类型的一行 (不保证一定是期望类型) "#expectType:buf"
 func (t *trzszTransfer) recvLine(expectType string, mayHasJunk bool, timeout <-chan time.Time) ([]byte, error) {
 	if err := t.checkStop(); err != nil {
 		return nil, err
 	}
 
+	// windows 环境下
 	if isWindowsEnvironment() || t.windowsProtocol {
 		line, err := t.buffer.readLineOnWindows(timeout)
 		if err != nil {
@@ -269,10 +286,12 @@ func (t *trzszTransfer) recvLine(expectType string, mayHasJunk bool, timeout <-c
 			}
 			return nil, err
 		}
+		// 读取期望类型的行
 		idx := bytes.LastIndex(line, []byte("#"+expectType+":"))
 		if idx >= 0 {
 			line = line[idx:]
 		} else {
+			// 读取非期望类型的一行
 			idx = bytes.LastIndexByte(line, '#')
 			if idx > 0 {
 				line = line[idx:]
@@ -281,6 +300,7 @@ func (t *trzszTransfer) recvLine(expectType string, mayHasJunk bool, timeout <-c
 		return line, nil
 	}
 
+	// 非 windows 环境
 	line, err := t.buffer.readLine(t.transferConfig.TmuxOutputJunk || mayHasJunk, timeout)
 	if err != nil {
 		if e := t.checkStop(); e != nil {
@@ -305,6 +325,7 @@ func (t *trzszTransfer) recvLine(expectType string, mayHasJunk bool, timeout <-c
 	return line, nil
 }
 
+// 接收期望类型的一行 (保证一定是期望类型) "#expectType:buf"
 func (t *trzszTransfer) recvCheck(expectType string, mayHasJunk bool, timeout <-chan time.Time) (string, error) {
 	line, err := t.recvLine(expectType, mayHasJunk, timeout)
 	if err != nil {
@@ -325,10 +346,12 @@ func (t *trzszTransfer) recvCheck(expectType string, mayHasJunk bool, timeout <-
 	return buf, nil
 }
 
+// 发送一个 int "#typ:11\n"
 func (t *trzszTransfer) sendInteger(typ string, val int64) error {
 	return t.sendLine(typ, strconv.FormatInt(val, 10))
 }
 
+// 接收一个 int
 func (t *trzszTransfer) recvInteger(typ string, mayHasJunk bool, timeout <-chan time.Time) (int64, error) {
 	buf, err := t.recvCheck(typ, mayHasJunk, timeout)
 	if err != nil {
@@ -337,6 +360,7 @@ func (t *trzszTransfer) recvInteger(typ string, mayHasJunk bool, timeout <-chan 
 	return strconv.ParseInt(buf, 10, 64)
 }
 
+// 接收一个 int 并比较 期望的 expect (int) 是否相等
 func (t *trzszTransfer) checkInteger(expect int64, timeout <-chan time.Time) error {
 	result, err := t.recvInteger("SUCC", false, timeout)
 	if err != nil {
@@ -348,10 +372,12 @@ func (t *trzszTransfer) checkInteger(expect int64, timeout <-chan time.Time) err
 	return nil
 }
 
+// 发送一个 string
 func (t *trzszTransfer) sendString(typ string, str string) error {
 	return t.sendLine(typ, encodeString(str))
 }
 
+// 接收一个 string
 func (t *trzszTransfer) recvString(typ string, mayHasJunk bool, timeout <-chan time.Time) (string, error) {
 	buf, err := t.recvCheck(typ, mayHasJunk, timeout)
 	if err != nil {
@@ -364,6 +390,7 @@ func (t *trzszTransfer) recvString(typ string, mayHasJunk bool, timeout <-chan t
 	return string(b), nil
 }
 
+// 接收一个 string 并比较 期望的 expect (string) 是否相等
 func (t *trzszTransfer) checkString(expect string, timeout <-chan time.Time) error { // nolint:all
 	result, err := t.recvString("SUCC", false, timeout)
 	if err != nil {
@@ -375,10 +402,12 @@ func (t *trzszTransfer) checkString(expect string, timeout <-chan time.Time) err
 	return nil
 }
 
+// 发送一个二进制文件(字节序列)
 func (t *trzszTransfer) sendBinary(typ string, buf []byte) error {
 	return t.sendLine(typ, encodeBytes(buf))
 }
 
+// 接收一个二进制文件(字节序列)
 func (t *trzszTransfer) recvBinary(typ string, mayHasJunk bool, timeout <-chan time.Time) ([]byte, error) {
 	buf, err := t.recvCheck(typ, mayHasJunk, timeout)
 	if err != nil {
@@ -387,6 +416,7 @@ func (t *trzszTransfer) recvBinary(typ string, mayHasJunk bool, timeout <-chan t
 	return decodeString(buf)
 }
 
+// 接收一个 二进制 字符序列, 并比较 期望的 expect ([]byte) 是否相等
 func (t *trzszTransfer) checkBinary(expect []byte, timeout <-chan time.Time) error {
 	result, err := t.recvBinary("SUCC", false, timeout)
 	if err != nil {
@@ -398,11 +428,13 @@ func (t *trzszTransfer) checkBinary(expect []byte, timeout <-chan time.Time) err
 	return nil
 }
 
+// 发送一个字节系列
 func (t *trzszTransfer) sendData(data []byte) error {
 	if err := t.checkStop(); err != nil {
 		return err
 	}
 	if !t.transferConfig.Binary {
+		// 如果不是 发送二进制序列
 		return t.sendBinary("DATA", data)
 	}
 	buf := escapeData(data, t.transferConfig.EscapeCodes)
