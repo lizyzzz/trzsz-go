@@ -79,6 +79,7 @@ func SetAffectedByWindows(affected bool) {
 	windowsEnvironment = affected
 }
 
+// 过程回调函数接口类型 (textProgressBar 实现了该接口)
 type progressCallback interface {
 	onNum(num int64)
 	onName(name string)
@@ -101,16 +102,17 @@ const (
 	kCompressNo   = 2
 )
 
+// 基础命令行参数
 type baseArgs struct {
-	Quiet     bool         `arg:"-q" help:"quiet (hide progress bar)"`
-	Overwrite bool         `arg:"-y" help:"yes, overwrite existing file(s)"`
-	Binary    bool         `arg:"-b" help:"binary transfer mode, faster for binary files"`
-	Escape    bool         `arg:"-e" help:"escape all known control characters"`
-	Directory bool         `arg:"-d" help:"transfer directories and files"`
-	Recursive bool         `arg:"-r" help:"transfer directories and files, same as -d"`
-	Bufsize   bufferSize   `arg:"-B" placeholder:"N" default:"10M" help:"max buffer chunk size (1K<=N<=1G). (default: 10M)"`
-	Timeout   int          `arg:"-t" placeholder:"N" default:"20" help:"timeout ( N seconds ) for each buffer chunk.\nN <= 0 means never timeout. (default: 20)"`
-	Compress  compressType `arg:"-c" placeholder:"yes/no/auto" default:"auto" help:"compress type (default: auto)"`
+	Quiet     bool         `arg:"-q" help:"quiet (hide progress bar)"`                                                                                            // 是否隐藏进度条
+	Overwrite bool         `arg:"-y" help:"yes, overwrite existing file(s)"`                                                                                      // 是否覆盖已有文件
+	Binary    bool         `arg:"-b" help:"binary transfer mode, faster for binary files"`                                                                        // 是否二进制传输模式
+	Escape    bool         `arg:"-e" help:"escape all known control characters"`                                                                                  // 是否转义所有已知的控制字符
+	Directory bool         `arg:"-d" help:"transfer directories and files"`                                                                                       // 是否传输目录
+	Recursive bool         `arg:"-r" help:"transfer directories and files, same as -d"`                                                                           // 是否传输目录
+	Bufsize   bufferSize   `arg:"-B" placeholder:"N" default:"10M" help:"max buffer chunk size (1K<=N<=1G). (default: 10M)"`                                      // 缓冲空间大小
+	Timeout   int          `arg:"-t" placeholder:"N" default:"20" help:"timeout ( N seconds ) for each buffer chunk.\nN <= 0 means never timeout. (default: 20)"` // 超时时间
+	Compress  compressType `arg:"-c" placeholder:"yes/no/auto" default:"auto" help:"compress type (default: auto)"`                                               // 压缩类型
 }
 
 // 正则表达式:小写模式, 从头部匹配 多个数字, 从尾部匹配0或1个单位
@@ -293,14 +295,14 @@ func checkPathWritable(path string) error {
 
 // json:"-" 表示json不解析该字段
 type sourceFile struct {
-	PathID   int           `json:"path_id"`
-	AbsPath  string        `json:"-"`
+	PathID   int           `json:"path_id"`   // 路径ID
+	AbsPath  string        `json:"-"`         // 绝对路径
 	RelPath  []string      `json:"path_name"` // 目录下的所有文件和子目录的相对路径(一个相对路径可以Join成一个绝对路径)
-	IsDir    bool          `json:"is_dir"`
-	Archive  bool          `json:"archive"`
-	Size     int64         `json:"size"`
-	Header   string        `json:"-"`
-	SubFiles []*sourceFile `json:"-"`
+	IsDir    bool          `json:"is_dir"`    // 是否是目录
+	Archive  bool          `json:"archive"`   // 是否是归档文件(目录或压缩文件)
+	Size     int64         `json:"size"`      // 文件大小
+	Header   string        `json:"-"`         // 头部信息
+	SubFiles []*sourceFile `json:"-"`         // 子目录
 }
 
 func (f *sourceFile) getFileName() string {
@@ -943,6 +945,7 @@ func formatSavedFiles(fileNames []string, destPath string) string {
 	return builder.String()
 }
 
+// 形成新的字符串, 格式为头部\r\n- filename1\r\n- filename2\r\n-
 func joinFileNames(header string, fileNames []string) string {
 	var builder strings.Builder
 	builder.WriteString(header)

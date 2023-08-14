@@ -29,13 +29,13 @@ import (
 	"time"
 )
 
-// 发送缓存类型
+// 读取缓存类型
 type trzszBuffer struct {
-	bufCh      chan []byte
-	stopCh     chan bool
-	nextBuf    []byte
-	nextIdx    int // 下一个可读取的下表
-	readBuf    bytes.Buffer
+	bufCh      chan []byte      // 数据通道
+	stopCh     chan bool        // 停止信号接收通道
+	nextBuf    []byte           // 循环读取通道的数据
+	nextIdx    int              // 下一个可读取的下标
+	readBuf    bytes.Buffer     // 操作字节 slice
 	timeout    <-chan time.Time // 上一个超时时间
 	newTimeout <-chan time.Time // 新的超时时间
 }
@@ -96,6 +96,7 @@ func (b *trzszBuffer) nextBuffer() ([]byte, error) {
 	if b.nextBuf != nil && b.nextIdx < len(b.nextBuf) {
 		return b.nextBuf[b.nextIdx:], nil
 	}
+	// 把原有的数据先返回再循环从通道里读
 	for {
 		select {
 		case b.nextBuf = <-b.bufCh:

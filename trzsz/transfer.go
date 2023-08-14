@@ -54,43 +54,43 @@ const (
 
 type transferAction struct {
 	Lang             string `json:"lang"`
-	Version          string `json:"version"`
+	Version          string `json:"version"` // 版本号
 	Confirm          bool   `json:"confirm"`
-	Newline          string `json:"newline"`
-	Protocol         int    `json:"protocol"`
-	SupportBinary    bool   `json:"binary"`
-	SupportDirectory bool   `json:"support_dir"`
+	Newline          string `json:"newline"`     // 新一行的标记
+	Protocol         int    `json:"protocol"`    // 协议
+	SupportBinary    bool   `json:"binary"`      // 是否支持二进制序列
+	SupportDirectory bool   `json:"support_dir"` // 是否支持目录
 }
 
 type transferConfig struct {
-	Quiet           bool         `json:"quiet"`
-	Binary          bool         `json:"binary"` // 是否是发送二进制文件(字节序列)
-	Directory       bool         `json:"directory"`
-	Overwrite       bool         `json:"overwrite"`
-	Timeout         int          `json:"timeout"`
-	Newline         string       `json:"newline"` // 新一行的标记
-	Protocol        int          `json:"protocol"`
-	MaxBufSize      int64        `json:"bufsize"`
-	EscapeCodes     escapeArray  `json:"escape_chars"` // 转义字符数组
-	TmuxPaneColumns int32        `json:"tmux_pane_width"`
+	Quiet           bool         `json:"quiet"`            // 是否隐藏进度条
+	Binary          bool         `json:"binary"`           // 是否传输二进制文件(字节序列)
+	Directory       bool         `json:"directory"`        // 是否传输目录
+	Overwrite       bool         `json:"overwrite"`        // 是否覆盖已有文件
+	Timeout         int          `json:"timeout"`          // 超时时间
+	Newline         string       `json:"newline"`          // 新一行的标记
+	Protocol        int          `json:"protocol"`         // 传输协议
+	MaxBufSize      int64        `json:"bufsize"`          // 最大缓冲空间
+	EscapeCodes     escapeArray  `json:"escape_chars"`     // 转义表
+	TmuxPaneColumns int32        `json:"tmux_pane_width"`  // Tmux 列数
 	TmuxOutputJunk  bool         `json:"tmux_output_junk"` // tmux 是否会输出 \r 字符
-	CompressType    compressType `json:"compress"`
+	CompressType    compressType `json:"compress"`         // 压缩类型
 }
 
 type trzszTransfer struct {
-	buffer           *trzszBuffer // 数据传输的 buffer
-	writer           io.Writer
-	stopped          atomic.Bool
-	stopAndDelete    atomic.Bool
-	pausing          atomic.Bool               // 是否正在暂停
-	pauseIdx         atomic.Uint32             // 暂停的次数
-	pauseBeginTime   atomic.Int64              // 暂停的开始时间
-	resumeBeginTime  atomic.Pointer[time.Time] // 恢复传输的时间
-	lastInputTime    atomic.Int64              // 上一次的输入时间
-	cleanTimeout     time.Duration             // 超时时间
-	lastChunkTimeArr [kLastChunkTimeCount]time.Duration
-	lastChunkTimeIdx int
-	stdinState       *term.State
+	buffer           *trzszBuffer                       // 数据接收的 buffer(read)
+	writer           io.Writer                          // 数据发送的 write
+	stopped          atomic.Bool                        // 是否停止
+	stopAndDelete    atomic.Bool                        // 是否停止并删除
+	pausing          atomic.Bool                        // 是否正在暂停
+	pauseIdx         atomic.Uint32                      // 暂停的次数
+	pauseBeginTime   atomic.Int64                       // 暂停的开始时间
+	resumeBeginTime  atomic.Pointer[time.Time]          // 恢复传输的时间
+	lastInputTime    atomic.Int64                       // 上一次的输入时间
+	cleanTimeout     time.Duration                      // 清空输入的超时时间
+	lastChunkTimeArr [kLastChunkTimeCount]time.Duration // 最近 k 块的
+	lastChunkTimeIdx int                                // 最后一块的时间下标
+	stdinState       *term.State                        // stdin 的原始状态
 	fileNameMap      map[int]string
 	windowsProtocol  bool
 	flushInTime      bool // 是否及时刷盘
@@ -100,7 +100,7 @@ type trzszTransfer struct {
 	savedSteps       atomic.Int64
 	transferConfig   transferConfig
 	logger           *traceLogger
-	createdFiles     []string
+	createdFiles     []string // 已经创建的文件
 }
 
 // 两个最大的 time.Duration
@@ -165,7 +165,7 @@ func (t *trzszTransfer) stopTransferringFiles(stopAndDelete bool) {
 	t.stopped.Store(true)
 	t.buffer.stopBuffer()
 
-	// 更新超时时间
+	// 更新清空输入的超时时间
 	maxChunkTime := time.Duration(0)
 	for _, chunkTime := range t.lastChunkTimeArr {
 		if chunkTime > maxChunkTime {
@@ -360,7 +360,7 @@ func (t *trzszTransfer) recvInteger(typ string, mayHasJunk bool, timeout <-chan 
 	return strconv.ParseInt(buf, 10, 64)
 }
 
-// 接收一个 int 并比较 期望的 expect (int) 是否相等
+// 接收一个类型是"SUCC"的 int 并比较 期望的 expect (int) 是否相等
 func (t *trzszTransfer) checkInteger(expect int64, timeout <-chan time.Time) error {
 	result, err := t.recvInteger("SUCC", false, timeout)
 	if err != nil {
@@ -390,7 +390,7 @@ func (t *trzszTransfer) recvString(typ string, mayHasJunk bool, timeout <-chan t
 	return string(b), nil
 }
 
-// 接收一个 string 并比较 期望的 expect (string) 是否相等
+// 接收一个类型是"SUCC"的 string 并比较 期望的 expect (string) 是否相等
 func (t *trzszTransfer) checkString(expect string, timeout <-chan time.Time) error { // nolint:all
 	result, err := t.recvString("SUCC", false, timeout)
 	if err != nil {
@@ -477,6 +477,7 @@ func (t *trzszTransfer) recvData() ([]byte, error) {
 	return buf, nil
 }
 
+// 发送 关于发送操作的配置
 func (t *trzszTransfer) sendAction(confirm bool, serverVersion *trzszVersion, remoteIsWindows bool) error {
 	protocol := kProtocolVersion
 	if serverVersion != nil &&
@@ -496,7 +497,7 @@ func (t *trzszTransfer) sendAction(confirm bool, serverVersion *trzszVersion, re
 		action.Newline = "!\n"
 		action.SupportBinary = false
 	}
-	actStr, err := json.Marshal(action)
+	actStr, err := json.Marshal(action) // 解析成 json 格式发送
 	if err != nil {
 		return err
 	}
@@ -504,11 +505,12 @@ func (t *trzszTransfer) sendAction(confirm bool, serverVersion *trzszVersion, re
 		t.windowsProtocol = true
 		t.transferConfig.Newline = "!\n"
 	}
-	return t.sendString("ACT", string(actStr))
+	return t.sendString("ACT", string(actStr)) // 发送 ACT 类型 json
 }
 
+// 接收 关于发送操作的配置
 func (t *trzszTransfer) recvAction() (*transferAction, error) {
-	actStr, err := t.recvString("ACT", false, nil)
+	actStr, err := t.recvString("ACT", false, nil) // 接收 ACT 类型(参数为什么是 false, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -523,6 +525,7 @@ func (t *trzszTransfer) recvAction() (*transferAction, error) {
 	return action, nil
 }
 
+// 发送 配置文件
 func (t *trzszTransfer) sendConfig(args *baseArgs, action *transferAction, escapeChars [][]unicode, tmuxMode tmuxModeType, tmuxPaneWidth int32) error {
 	cfgMap := map[string]interface{}{
 		"lang": "go",
@@ -531,6 +534,7 @@ func (t *trzszTransfer) sendConfig(args *baseArgs, action *transferAction, escap
 		cfgMap["quiet"] = true
 	}
 	if args.Binary {
+		// 二进制模式下需要转义
 		cfgMap["binary"] = true
 		cfgMap["escape_chars"] = escapeChars
 	}
@@ -552,18 +556,20 @@ func (t *trzszTransfer) sendConfig(args *baseArgs, action *transferAction, escap
 	if args.Compress != kCompressAuto {
 		cfgMap["compress"] = args.Compress
 	}
-	cfgStr, err := json.Marshal(cfgMap)
+	cfgStr, err := json.Marshal(cfgMap) // 解析到 json
 	if err != nil {
 		return err
 	}
 	if err := json.Unmarshal([]byte(cfgStr), &t.transferConfig); err != nil {
+		// 从 json 解析到 transferConfig
 		return err
 	}
-	return t.sendString("CFG", string(cfgStr))
+	return t.sendString("CFG", string(cfgStr)) // 发送 cfg 类型
 }
 
+// 接收配置文件
 func (t *trzszTransfer) recvConfig() (*transferConfig, error) {
-	cfgStr, err := t.recvString("CFG", true, t.getNewTimeout())
+	cfgStr, err := t.recvString("CFG", true, t.getNewTimeout()) // 接收 CFG 类型(参数为什么是 true, newTimeout)
 	if err != nil {
 		return nil, err
 	}
@@ -573,32 +579,36 @@ func (t *trzszTransfer) recvConfig() (*transferConfig, error) {
 	return &t.transferConfig, nil
 }
 
+// 客户端退出, 发送退出消息
 func (t *trzszTransfer) clientExit(msg string) error {
 	return t.sendString("EXIT", msg)
 }
 
+// 接收客户端退出消息
 func (t *trzszTransfer) recvExit() (string, error) {
 	return t.recvString("EXIT", false, t.getNewTimeout())
 }
 
+// 服务端退出
 func (t *trzszTransfer) serverExit(msg string) {
-	t.cleanInput(500 * time.Millisecond)
+	t.cleanInput(500 * time.Millisecond) // 首先清除输入
 	if t.stdinState != nil {
-		_ = term.Restore(int(os.Stdin.Fd()), t.stdinState)
+		_ = term.Restore(int(os.Stdin.Fd()), t.stdinState) // 恢复原来的状态 (t.stdinState记录了原来的状态)
 	}
 	if isRunningOnWindows() {
-		msg = strings.ReplaceAll(msg, "\n", "\r\n")
-		os.Stdout.WriteString("\x1b[H\x1b[2J\x1b[?1049l")
+		msg = strings.ReplaceAll(msg, "\n", "\r\n")       // windows 下把 \n 替换成 \r\n
+		os.Stdout.WriteString("\x1b[H\x1b[2J\x1b[?1049l") // \x1b[H - 光标回到 1,1 位置; \x1b[2J - 清屏
 	} else {
-		os.Stdout.WriteString("\x1b8\x1b[0J")
+		os.Stdout.WriteString("\x1b8\x1b[0J") // \x1b[0J - 清除光标之后的内容
 	}
-	os.Stdout.WriteString(msg)
-	os.Stdout.WriteString("\r\n")
+	os.Stdout.WriteString(msg)    // 写到 标准输出
+	os.Stdout.WriteString("\r\n") // 换行
 	if t.transferConfig.TmuxOutputJunk {
-		tmuxRefreshClient()
+		tmuxRefreshClient() // 更新 tmux 客户端
 	}
 }
 
+// 删除已创建的文件, 返回已删除的文件
 func (t *trzszTransfer) deleteCreatedFiles() []string {
 	var deletedFiles []string
 	for _, path := range t.createdFiles {
@@ -606,12 +616,14 @@ func (t *trzszTransfer) deleteCreatedFiles() []string {
 			continue
 		}
 		if err := os.RemoveAll(path); err == nil {
+			// 删除 path 路径下的所有内容
 			deletedFiles = append(deletedFiles, path)
 		}
 	}
 	return deletedFiles
 }
 
+// 处理客户端的错误
 func (t *trzszTransfer) clientError(err error) {
 	t.cleanInput(t.cleanTimeout)
 
@@ -624,9 +636,10 @@ func (t *trzszTransfer) clientError(err error) {
 	}
 
 	if t.stopAndDelete.Load() {
+		// 如果传输错误需要停止并删除
 		deletedFiles := t.deleteCreatedFiles()
 		if len(deletedFiles) > 0 {
-			_ = t.sendString("fail", joinFileNames(err.Error()+":", deletedFiles))
+			_ = t.sendString("fail", joinFileNames(err.Error()+":", deletedFiles)) // 发送传输失败的文件路径
 			return
 		}
 	}
@@ -635,12 +648,14 @@ func (t *trzszTransfer) clientError(err error) {
 	if trace {
 		typ = "FAIL"
 	}
-	_ = t.sendString(typ, err.Error())
+	_ = t.sendString(typ, err.Error()) // 发送错误信息
 }
 
+// 处理服务端错误
 func (t *trzszTransfer) serverError(err error) {
 	t.cleanInput(t.cleanTimeout)
 
+	// 服务端错误先由 err 判断
 	trace := true
 	if e, ok := err.(*trzszError); ok {
 		if e.isStopAndDelete() {
@@ -666,10 +681,12 @@ func (t *trzszTransfer) serverError(err error) {
 	t.serverExit(err.Error())
 }
 
+// 发送文件 num
 func (t *trzszTransfer) sendFileNum(num int64, progress progressCallback) error {
 	if err := t.sendInteger("NUM", num); err != nil {
 		return err
 	}
+	// 接收 响应 "SUCC"
 	if err := t.checkInteger(num, t.getNewTimeout()); err != nil {
 		return err
 	}
@@ -679,8 +696,10 @@ func (t *trzszTransfer) sendFileNum(num int64, progress progressCallback) error 
 	return nil
 }
 
+// 发送文件名称
 func (t *trzszTransfer) sendFileName(srcFile *sourceFile, progress progressCallback) (fileReader, string, error) {
 	var fileName string
+	// 如果是目录先解析成 json
 	if t.transferConfig.Directory {
 		jsonName, err := srcFile.marshalSourceFile()
 		if err != nil {
@@ -690,10 +709,11 @@ func (t *trzszTransfer) sendFileName(srcFile *sourceFile, progress progressCallb
 	} else {
 		fileName = srcFile.getFileName()
 	}
+	// 发送文件名称
 	if err := t.sendString("NAME", fileName); err != nil {
 		return nil, "", err
 	}
-
+	// 接收文件名称的确认
 	remoteName, err := t.recvString("SUCC", false, t.getNewTimeout())
 	if err != nil {
 		return nil, "", err
