@@ -739,10 +739,13 @@ func (t *trzszTransfer) sendFileName(srcFile *sourceFile, progress progressCallb
 	return &simpleFileReader{file, srcFile.Size}, remoteName, nil
 }
 
+// 发送文件的大小
 func (t *trzszTransfer) sendFileSize(size int64, progress progressCallback) error {
+	// 先发送文件的大小
 	if err := t.sendInteger("SIZE", size); err != nil {
 		return err
 	}
+	// 接受文件大小的确认
 	if err := t.checkInteger(size, t.getNewTimeout()); err != nil {
 		return err
 	}
