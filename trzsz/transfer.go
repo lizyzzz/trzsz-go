@@ -67,11 +67,11 @@ type transferConfig struct {
 	Binary          bool         `json:"binary"` // 是否是发送二进制文件(字节序列)
 	Directory       bool         `json:"directory"`
 	Overwrite       bool         `json:"overwrite"`
-	Timeout         int          `json:"timeout"`
+	Timeout         int          `json:"timeout"` // 超时值, 单位是 s
 	Newline         string       `json:"newline"` // 新一行的标记
 	Protocol        int          `json:"protocol"`
 	MaxBufSize      int64        `json:"bufsize"`
-	EscapeCodes     escapeArray  `json:"escape_chars"` // 转义字符数组
+	EscapeCodes     escapeArray  `json:"escape_chars"` // 转义表
 	TmuxPaneColumns int32        `json:"tmux_pane_width"`
 	TmuxOutputJunk  bool         `json:"tmux_output_junk"` // tmux 是否会输出 \r 字符
 	CompressType    compressType `json:"compress"`
@@ -428,7 +428,7 @@ func (t *trzszTransfer) checkBinary(expect []byte, timeout <-chan time.Time) err
 	return nil
 }
 
-// 发送一个字节系列
+// 发送一个字节序列 (可能会先转义(加密))
 func (t *trzszTransfer) sendData(data []byte) error {
 	if err := t.checkStop(); err != nil {
 		return err
@@ -437,42 +437,46 @@ func (t *trzszTransfer) sendData(data []byte) error {
 		// 如果不是 发送二进制序列
 		return t.sendBinary("DATA", data)
 	}
-	buf := escapeData(data, t.transferConfig.EscapeCodes)
+	buf := escapeData(data, t.transferConfig.EscapeCodes) // 对字节序列先转义(加密)
 	if err := t.writeAll([]byte(fmt.Sprintf("#DATA:%d\n", len(buf)))); err != nil {
+		// 先写一个头部信息表示接下来字节的长度
 		return err
 	}
-	return t.writeAll(buf)
+	return t.writeAll(buf) // 再写真实数据
 }
 
+// 获得一个新的 timeout 接收通道
 func (t *trzszTransfer) getNewTimeout() <-chan time.Time {
 	if t.transferConfig.Timeout > 0 {
-		return time.NewTimer(time.Duration(t.transferConfig.Timeout) * time.Second).C
+		return time.NewTimer(time.Duration(t.transferConfig.Timeout) * time.Second).C // 定时器会在固定时间后发送当前时间到通道
 	}
 	return nil
 }
 
+// 接收一个字节序列 (可能会有解密过程)
 func (t *trzszTransfer) recvData() ([]byte, error) {
 	timeout := t.getNewTimeout()
 	if !t.transferConfig.Binary {
+		// 如果不发送 二进制序列, 则 data 通过 bianry 接口发送
 		return t.recvBinary("DATA", false, timeout)
 	}
-	size, err := t.recvInteger("DATA", false, timeout)
+	size, err := t.recvInteger("DATA", false, timeout) // 先读取长度
 	if err != nil {
 		return nil, err
 	}
-	data, err := t.buffer.readBinary(int(size), timeout)
+	data, err := t.buffer.readBinary(int(size), timeout) // 读取实际长度的数据
 	if err != nil {
 		if e := t.checkStop(); e != nil {
 			return nil, e
 		}
 		return nil, err
 	}
-	buf, remaining, err := unescapeData(data, t.transferConfig.EscapeCodes, nil)
+	buf, remaining, err := unescapeData(data, t.transferConfig.EscapeCodes, nil) // 逆转义(解密)
 	if err != nil {
 		return nil, err
 	}
 	if len(remaining) != 0 {
-		return nil, simpleTrzszError("Unescape has bytes remaining: %v", remaining)
+		return nil, simpleTrzszError("Unescape has bytes remaining: %v", remaining) // 没有完全解密(原因可能是dst空间不够)
 	}
 	return buf, nil
 }

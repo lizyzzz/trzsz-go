@@ -33,9 +33,9 @@ import (
 type trzszBuffer struct {
 	bufCh      chan []byte
 	stopCh     chan bool
-	nextBuf    []byte
-	nextIdx    int // 下一个可读取的下表
-	readBuf    bytes.Buffer
+	nextBuf    []byte           // 缓冲空间
+	nextIdx    int              // 缓冲空间下一个可读取的下标
+	readBuf    bytes.Buffer     // 从缓冲空间读取, 再对外开放读取的接口
 	timeout    <-chan time.Time // 上一个超时时间
 	newTimeout <-chan time.Time // 新的超时时间
 }
@@ -91,7 +91,7 @@ func (b *trzszBuffer) setNewTimeout(timeout <-chan time.Time) {
 	b.newTimeout = timeout
 }
 
-// 返回 nextBuffer 但不置空
+// 返回 nextBuffer 中未被读取的序列
 func (b *trzszBuffer) nextBuffer() ([]byte, error) {
 	if b.nextBuf != nil && b.nextIdx < len(b.nextBuf) {
 		return b.nextBuf[b.nextIdx:], nil
@@ -114,13 +114,13 @@ func (b *trzszBuffer) nextBuffer() ([]byte, error) {
 	}
 }
 
-// 以 \n 为分隔符读取一行
+// 以 \n 为分隔符读取一行字节序列并返回
 func (b *trzszBuffer) readLine(mayHasJunk bool, timeout <-chan time.Time) ([]byte, error) {
 	b.readBuf.Reset()
 	b.timeout = timeout
 	b.newTimeout = nil
 	for {
-		buf, err := b.nextBuffer()
+		buf, err := b.nextBuffer() // 从缓冲通道读取
 		if err != nil {
 			return nil, err
 		}
@@ -134,7 +134,7 @@ func (b *trzszBuffer) readLine(mayHasJunk bool, timeout <-chan time.Time) ([]byt
 		if bytes.IndexByte(buf, '\x03') >= 0 { // `ctrl + c` to interrupt
 			return nil, simpleTrzszError("Interrupted") // 存在 ctrl + c
 		}
-		b.readBuf.Write(buf)
+		b.readBuf.Write(buf) // 写到对外buff接口
 		if newLineIdx >= 0 {
 			// \r\n 的情况 且 mayHasJunk , 允许多次写入
 			if mayHasJunk && b.readBuf.Len() > 0 && b.readBuf.Bytes()[b.readBuf.Len()-1] == '\r' {
@@ -146,7 +146,7 @@ func (b *trzszBuffer) readLine(mayHasJunk bool, timeout <-chan time.Time) ([]byt
 	}
 }
 
-// 读取固定长度的 字节
+// 读取固定长度的字节 并返回
 func (b *trzszBuffer) readBinary(size int, timeout <-chan time.Time) ([]byte, error) {
 	b.readBuf.Reset()
 	if b.readBuf.Cap() < size {
@@ -155,7 +155,7 @@ func (b *trzszBuffer) readBinary(size int, timeout <-chan time.Time) ([]byte, er
 	b.timeout = timeout
 	b.newTimeout = nil
 	for b.readBuf.Len() < size {
-		buf, err := b.nextBuffer()
+		buf, err := b.nextBuffer() // 从缓冲空间读取
 		if err != nil {
 			return nil, err
 		}

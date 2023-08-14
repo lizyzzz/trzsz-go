@@ -37,7 +37,7 @@ type unicode string
 
 type escapeArray [][]byte
 
-const escapeLeaderByte = '\xee'
+const escapeLeaderByte = '\xee' // 约定的转义头
 
 // 解析到 JSON
 func (s unicode) MarshalJSON() ([]byte, error) {
@@ -54,7 +54,7 @@ func (s unicode) MarshalJSON() ([]byte, error) {
 	return b.Bytes(), nil
 }
 
-// 获取转义字符
+// 获取转义字符 (第一个转义字符是原字符, 第二个转义字符是头字符, 第三个字符是转义后的字符; 类似映射转换)
 func getEscapeChars(escapeAll bool) [][]unicode {
 	escapeChars := [][]unicode{
 		{"\u00ee", "\u00ee\u00ee"},
@@ -69,7 +69,7 @@ func getEscapeChars(escapeAll bool) [][]unicode {
 	return escapeChars
 }
 
-// 从字符 转义到 codes
+// 从 转义字符 转换为 转义表
 func escapeCharsToCodes(escapeChars []interface{}) ([][]byte, error) {
 	escapeCodes := make([][]byte, len(escapeChars))
 	encoder := charmap.ISO8859_1.NewEncoder()
@@ -114,6 +114,7 @@ func escapeCharsToCodes(escapeChars []interface{}) ([][]byte, error) {
 	return escapeCodes, nil
 }
 
+// 从 json 解析 转义表
 func (c *escapeArray) UnmarshalJSON(data []byte) error {
 	var codes []interface{}
 	if err := json.Unmarshal(data, &codes); err != nil {
@@ -124,7 +125,7 @@ func (c *escapeArray) UnmarshalJSON(data []byte) error {
 	return err
 }
 
-// 转义 字节序列
+// 根据转义表 转义字节序列(相当于加密过程)
 func escapeData(data []byte, escapeCodes [][]byte) []byte {
 	if len(escapeCodes) == 0 {
 		return data
@@ -153,7 +154,9 @@ func escapeData(data []byte, escapeCodes [][]byte) []byte {
 	return buf[:idx]
 }
 
-// 解析 已转义的序列
+// 解析 已转义的序列;
+// 如果dst是空,则自动分配一个空间, 如果dst不空, 转义结果长度为 len(dst);
+// 返回值是 [转义的结果, 剩余未解析的data序列, 错误] (相当于解密过程)
 func unescapeData(data []byte, escapeCodes [][]byte, dst []byte) ([]byte, []byte, error) {
 	if len(escapeCodes) == 0 {
 		return data, nil, nil
@@ -170,9 +173,9 @@ func unescapeData(data []byte, escapeCodes [][]byte, dst []byte) ([]byte, []byte
 			if i == size-1 {
 				return buf[:idx], data[i:], nil
 			}
-			i++
+			i++ // 跳过 头字节
 			b := data[i]
-			escaped := false
+			escaped := false // 是否已转义
 			for _, e := range escapeCodes {
 				if b == e[2] {
 					buf[idx] = e[0]
