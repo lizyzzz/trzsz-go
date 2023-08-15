@@ -37,6 +37,7 @@ import (
 // 获取 字符展示的长度(ascii 码长度为1, 其他 utf-8 长度为 2)
 func getDisplayLength(str string) int {
 	length := 0
+	// 这里用 range str 更好
 	for _, r := range []rune(str) { // nolint:all
 		if utf8.RuneLen(r) == 1 {
 			length++
@@ -73,6 +74,7 @@ func getEllipsisString(str string, max int) (string, int) {
 	return b.String(), length + 3
 }
 
+// 把 size 转换为 string
 func convertSizeToString(size float64) string {
 	unit := "B"
 	for {
@@ -111,6 +113,7 @@ func convertSizeToString(size float64) string {
 	}
 }
 
+// 把时间转换为 string(hh:mm:ss)
 func convertTimeToString(seconds float64) string {
 	var b strings.Builder
 	if seconds >= 3600 {
@@ -138,24 +141,25 @@ func convertTimeToString(seconds float64) string {
 
 const kSpeedArraySize = 30
 
+// 文本进度条类
 type textProgressBar struct {
-	writer          io.Writer
-	columns         atomic.Int32
-	tmuxPaneColumns atomic.Int32
-	fileCount       int
+	writer          io.Writer    // writer
+	columns         atomic.Int32 // 进度条列数
+	tmuxPaneColumns atomic.Int32 // tmux 面板列数
+	fileCount       int          // 传输的文件数量
 	fileIdx         int
-	fileName        string
-	preSize         int64
-	fileSize        int64
-	fileStep        int64
-	startTime       *time.Time
-	lastUpdateTime  *time.Time
-	firstWrite      bool
-	speedCnt        int
-	speedIdx        int
-	timeArray       [kSpeedArraySize]*time.Time
-	stepArray       [kSpeedArraySize]int64
-	pausing         atomic.Bool
+	fileName        string                      // 文件名称
+	preSize         int64                       // 上一个已传输的文件大小
+	fileSize        int64                       // 文件累计大小
+	fileStep        int64                       // 文件已传输大小
+	startTime       *time.Time                  // 文件传输开始时间
+	lastUpdateTime  *time.Time                  // 最新的更新时间
+	firstWrite      bool                        // 是否第一次到 writer
+	speedCnt        int                         // getSpeed 的计数次数
+	speedIdx        int                         // 记录当前 timeArray 和 stepArray 的下标
+	timeArray       [kSpeedArraySize]*time.Time // 记录每次计算速度时的时间
+	stepArray       [kSpeedArraySize]int64      // 记录每次计算速度时的累计文件大小 (fileStep)
+	pausing         atomic.Bool                 // 暂停标记
 }
 
 func newTextProgressBar(writer io.Writer, columns int32, tmuxPaneColumns int32) *textProgressBar {
@@ -179,6 +183,7 @@ func (p *textProgressBar) setTerminalColumns(columns int32) {
 	}
 }
 
+// 实现 progressCallback 接口类型的方法 (更新 num)
 func (p *textProgressBar) onNum(num int64) {
 	if p == nil {
 		return
@@ -186,6 +191,7 @@ func (p *textProgressBar) onNum(num int64) {
 	p.fileCount = int(num)
 }
 
+// 实现 progressCallback 接口类型的方法 (更新 name)
 func (p *textProgressBar) onName(name string) {
 	if p == nil {
 		return
@@ -202,6 +208,7 @@ func (p *textProgressBar) onName(name string) {
 	p.fileStep = -1
 }
 
+// 实现 progressCallback 接口类型的方法 (更新 累计文件大小)
 func (p *textProgressBar) onSize(size int64) {
 	if p == nil {
 		return
@@ -209,6 +216,7 @@ func (p *textProgressBar) onSize(size int64) {
 	p.fileSize = p.preSize + size
 }
 
+// 实现 progressCallback 接口类型的方法 (更新 fileStep)
 func (p *textProgressBar) onStep(step int64) {
 	if p == nil {
 		return
@@ -223,6 +231,7 @@ func (p *textProgressBar) onStep(step int64) {
 	}
 }
 
+// 实现 progressCallback 接口类型的方法 (传输完成)
 func (p *textProgressBar) onDone() {
 	if p == nil {
 		return
@@ -235,6 +244,7 @@ func (p *textProgressBar) onDone() {
 	p.showProgress()
 }
 
+// 实现 progressCallback 接口类型的方法 (设置 preSzie)
 func (p *textProgressBar) setPreSize(size int64) {
 	if p == nil {
 		return
@@ -242,6 +252,7 @@ func (p *textProgressBar) setPreSize(size int64) {
 	p.preSize = size
 }
 
+// 实现 progressCallback 接口类型的方法 (设置暂停标记)
 func (p *textProgressBar) setPause(pausing bool) {
 	if p == nil {
 		return
@@ -249,6 +260,7 @@ func (p *textProgressBar) setPause(pausing bool) {
 	p.pausing.Store(pausing)
 }
 
+// 展示进度条
 func (p *textProgressBar) showProgress() {
 	now := timeNowFunc()
 	if p.lastUpdateTime != nil && now.Sub(*p.lastUpdateTime) < 200*time.Millisecond {
@@ -283,6 +295,7 @@ func (p *textProgressBar) showProgress() {
 	}
 }
 
+// 获取指定时间的传输速度
 func (p *textProgressBar) getSpeed(now *time.Time) float64 {
 	var speed float64
 	if p.speedCnt <= kSpeedArraySize {
